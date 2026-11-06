@@ -1,23 +1,70 @@
-name: My First CI Pipeline
+name: CI and automatic merge
 
 on:
   push:
     branches:
       - workpc
-  pull_request:
-    branches:
-      - main
-      
+
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   test:
+    name: CI check
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
-      - name: Show files
-        run: ls -la
+      - name: Run CI test
+        run: |
+          echo "Running CI test..."
+          test -f index.html
+          echo "CI test successful"
 
-      - name: Check index.html
-        run: test -f index.html
+  create-and-merge-pr:
+    name: Create and merge pull request
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Create or find pull request
+        id: pull-request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_NUMBER=$(gh pr list \
+            --base main \
+            --head workpc \
+            --state open \
+            --json number \
+            --jq '.[0].number')
+
+          if [ -z "$PR_NUMBER" ]; then
+            gh pr create \
+              --base main \
+              --head workpc \
+              --title "Automatic merge: workpc to main" \
+              --body "Automatically created after the CI check passed."
+
+            PR_NUMBER=$(gh pr list \
+              --base main \
+              --head workpc \
+              --state open \
+              --json number \
+              --jq '.[0].number')
+          fi
+
+          echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Merge pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pull-request.outputs.number }}
+        run: |
+          gh pr merge "$PR_NUMBER" --merge
